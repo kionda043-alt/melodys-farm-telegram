@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Melodys Farm — Panel Admin</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    :root {
+      --bg: #0d0d0d;
+      --surface: #1a1a1a;
+      --surface2: #242424;
+      --border: #333;
+      --gold: #f5c200;
+      --gold-dim: #c49a00;
+      --white: #f5f5f5;
+      --muted: #888;
+      --red: #e55;
+      --green: #4c4;
+      --radius: 10px;
+      --font: 'Inter', system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--white); font-family: var(--font); min-height: 100vh; }
+
+    /* ── LOGIN ────────────────────────────────────────────────────────────── */
+    #login-screen {
+      display: flex; align-items: center; justify-content: center;
+      min-height: 100vh;
+    }
+    .login-box {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; padding: 2.5rem; width: 360px; text-align: center;
+    }
+    .login-box h1 { color: var(--gold); font-size: 1.5rem; margin-bottom: .4rem; }
+    .login-box p  { color: var(--muted); font-size: .9rem; margin-bottom: 1.8rem; }
+    .login-box input {
+      width: 100%; padding: .75rem 1rem; background: var(--surface2);
+      border: 1px solid var(--border); border-radius: var(--radius);
+      color: var(--white); font-size: 1rem; margin-bottom: 1rem;
+    }
+    .login-box input:focus { outline: none; border-color: var(--gold); }
+    .login-box button {
+      width: 100%; padding: .85rem; background: var(--gold); color: #000;
+      font-weight: 700; font-size: 1rem; border: none; border-radius: var(--radius);
+      cursor: pointer; transition: background .2s;
+    }
+    .login-box button:hover { background: var(--gold-dim); }
+    #login-error { color: var(--red); font-size: .85rem; margin-top: .8rem; min-height: 1.2em; }
+
+    /* ── APP ──────────────────────────────────────────────────────────────── */
+    #app { display: none; }
+
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 1rem 2rem; background: var(--surface); border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; z-index: 100;
+    }
+    header .brand { display: flex; align-items: center; gap: .75rem; }
+    header .brand span { font-size: 1.1rem; font-weight: 700; color: var(--gold); }
+    header .badge { font-size: .75rem; color: var(--muted); background: var(--surface2); padding: .2rem .6rem; border-radius: 99px; border: 1px solid var(--border); }
+    header button#logout-btn {
+      background: none; border: 1px solid var(--border); color: var(--muted);
+      padding: .4rem .9rem; border-radius: var(--radius); cursor: pointer; font-size: .85rem;
+    }
+    header button#logout-btn:hover { color: var(--white); border-color: var(--white); }
+
+    nav {
+      display: flex; gap: .5rem; padding: 1rem 2rem;
+      border-bottom: 1px solid var(--border); overflow-x: auto;
+    }
+    nav button {
+      background: none; border: 1px solid var(--border); color: var(--muted);
+      padding: .5rem 1.2rem; border-radius: 99px; cursor: pointer; font-size: .875rem;
+      white-space: nowrap; transition: all .2s;
+    }
+    nav button.active, nav button:hover {
+      background: var(--gold); color: #000; border-color: var(--gold); font-weight: 600;
+    }
+
+    main { padding: 2rem; max-width: 1100px; margin: 0 auto; }
+
+    /* ── SECCIONES ────────────────────────────────────────────────────────── */
+    .section { display: none; }
+    .section.active { display: block; }
+
+    h2 { font-size: 1.3rem; margin-bottom: 1.5rem; color: var(--white); }
+    h3 { font-size: 1rem; margin-bottom: 1rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+
+    /* ── STATS ────────────────────────────────────────────────────────────── */
+    .stats-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 1rem; margin-bottom: 2rem;
+    }
+    .stat-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 1.25rem 1.5rem;
+    }
+    .stat-card .label { font-size: .8rem; color: var(--muted); margin-bottom: .3rem; }
+    .stat-card .value { font-size: 2rem; font-weight: 700; color: var(--gold); }
+    .stat-card .sub   { font-size: .8rem; color: var(--muted); margin-top: .2rem; }
+
+    /* ── TABLA ────────────────────────────────────────────────────────────── */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+    th {
+      text-align: left; padding: .75rem 1rem; color: var(--muted);
+      border-bottom: 1px solid var(--border); font-weight: 600;
+      white-space: nowrap;
+    }
+    td { padding: .75rem 1rem; border-bottom: 1px solid var(--surface2); }
+    tr:hover td { background: var(--surface2); }
+
+    /* ── BADGES ───────────────────────────────────────────────────────────── */
+    .badge-estado {
+      display: inline-block; padding: .2rem .65rem; border-radius: 99px;
+      font-size: .75rem; font-weight: 600;
+    }
+    .badge-pendiente  { background: #f5c20020; color: var(--gold); border: 1px solid var(--gold-dim); }
+    .badge-confirmado { background: #4c4c0020; color: #8f8; border: 1px solid #4c4; }
+    .badge-entregado  { background: #44444420; color: #aaa; border: 1px solid #555; }
+    .badge-cancelado  { background: #e5555520; color: #e88; border: 1px solid #a33; }
+
+    /* ── BOTONES ──────────────────────────────────────────────────────────── */
+    .btn {
+      display: inline-block; padding: .5rem 1rem; border-radius: var(--radius);
+      cursor: pointer; font-size: .85rem; font-weight: 600; border: none;
+      transition: opacity .15s; text-decoration: none;
+    }
+    .btn:hover { opacity: .85; }
+    .btn-gold   { background: var(--gold); color: #000; }
+    .btn-outline { background: none; border: 1px solid var(--border); color: var(--white); }
+    .btn-red    { background: #a33; color: #fff; }
+    .btn-green  { background: #2a5; color: #fff; }
+    .btn-sm     { padding: .3rem .7rem; font-size: .8rem; }
+
+    /* ── FORMULARIO ───────────────────────────────────────────────────────── */
+    .form-group { margin-bottom: 1rem; }
+    .form-group label { display: block; margin-bottom: .4rem; font-size: .875rem; color: var(--muted); }
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+      width: 100%; padding: .65rem .9rem; background: var(--surface2);
+      border: 1px solid var(--border); border-radius: var(--radius);
+      color: var(--white); font-size: .9rem;
+    }
+    .form-group input:focus,
+    .form-group select:focus,
+    .form-group textarea:focus { outline: none; border-color: var(--gold); }
+    .form-group textarea { min-height: 80px; resize: vertical; }
+    .form-group select option { background: #222; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+
+    /* ── MODAL ────────────────────────────────────────────────────────────── */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,.75); z-index: 200;
+      align-items: center; justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; padding: 2rem; width: 500px; max-width: 95vw;
+      max-height: 90vh; overflow-y: auto;
+    }
+    .modal h2 { margin-bottom: 1.5rem; }
+    .modal-footer { display: flex; gap: .75rem; justify-content: flex-end; margin-top: 1.5rem; }
+
+    /* ── TOGGLE ───────────────────────────────────────────────────────────── */
+    .toggle {
+      position: relative; display: inline-block; width: 40px; height: 22px;
+    }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider {
+      position: absolute; cursor: pointer; inset: 0;
+      background: var(--border); border-radius: 22px; transition: .2s;
+    }
+    .toggle-slider:before {
+      position: absolute; content: ""; height: 16px; width: 16px;
+      left: 3px; bottom: 3px; background: var(--white); border-radius: 50%; transition: .2s;
+    }
+    .toggle input:checked + .toggle-slider { background: var(--gold); }
+    .toggle input:checked + .toggle-slider:before { transform: translateX(18px); }
+
+    /* ── MISC ─────────────────────────────────────────────────────────────── */
+    .empty { text-align: center; color: var(--muted); padding: 3rem; }
+    .toast {
+      position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 999;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: .75rem 1.25rem; font-size: .875rem;
+      opacity: 0; transform: translateY(10px); transition: all .3s;
+      pointer-events: none;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast.ok  { border-color: #4c4; color: #8f8; }
+    .toast.err { border-color: #a33; color: #e88; }
+    .loading { text-align: center; color: var(--muted); padding: 2rem; }
+    .section-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 1.5rem;
+    }
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1.25rem; margin-bottom: 1rem;
+      display: flex; align-items: center; gap: 1rem;
+    }
+    .card-body { flex: 1; }
+    .card-body h4 { margin-bottom: .3rem; }
+    .card-body p  { font-size: .875rem; color: var(--muted); }
+    .card-actions { display: flex; gap: .5rem; }
+  </style>
+</head>
+<body>
+
+<!-- ════════════════ LOGIN ════════════════ -->
+<div id="login-screen">
+  <div class="login-box">
+    <h1>🌿 Melodys Farm</h1>
+    <p>Panel de Administración · YG Studio</p>
+    <input type="password" id="pwd-input" placeholder="Contraseña" onkeydown="if(event.key==='Enter')doLogin()" />
+    <button onclick="doLogin()">Entrar</button>
+    <div id="login-error"></div>
+  </div>
+</div>
+
+<!-- ════════════════ APP ════════════════ -->
+<div id="app">
+  <header>
+    <div class="brand">
+      <span>🌿 Melodys Farm</span>
+      <span class="badge">Admin</span>
+    </div>
+    <button id="logout-btn" onclick="doLogout()">Salir</button>
+  </header>
+
+  <nav>
+    <button class="active" onclick="showSection('dashboard', this)">Dashboard</button>
+    <button onclick="showSection('pedidos', this)">📦 Pedidos</button>
+    <button onclick="showSection('geneticas', this)">🌿 Genéticas</button>
+    <button onclick="showSection('promociones', this)">🎁 Promociones</button>
+    <button onclick="showSection('socios', this)">👥 Socios</button>
+  </nav>
+
+  <main>
+
+    <!-- ── DASHBOARD ── -->
+    <div id="section-dashboard" class="section active">
+      <h2>Dashboard</h2>
+      <div class="stats-grid" id="stats-container">
+        <div class="stat-card"><div class="label">Pedidos hoy</div><div class="value" id="stat-pedidos-hoy">—</div></div>
+        <div class="stat-card"><div class="label">Pendientes</div><div class="value" id="stat-pendientes">—</div></div>
+        <div class="stat-card"><div class="label">Genéticas activas</div><div class="value" id="stat-geneticas">—</div></div>
+        <div class="stat-card"><div class="label">Socios registrados</div><div class="value" id="stat-socios">—</div></div>
+      </div>
+
+      <h3>Pedidos pendientes</h3>
+      <div id="dashboard-pedidos-list"><div class="loading">Cargando...</div></div>
+    </div>
+
+    <!-- ── PEDIDOS ── -->
+    <div id="section-pedidos" class="section">
+      <div class="section-header">
+        <h2>Pedidos</h2>
+        <div style="display:flex;gap:.5rem">
+          <select id="filtro-estado" onchange="loadPedidos()" style="background:var(--surface2);border:1px solid var(--border);color:var(--white);padding:.4rem .8rem;border-radius:var(--radius);font-size:.875rem">
+            <option value="">Todos</option>
+            <option value="pendiente" selected>Pendientes</option>
+            <option value="confirmado">Confirmados</option>
+            <option value="entregado">Entregados</option>
+            <option value="cancelado">Cancelados</option>
+          </select>
+          <button class="btn btn-outline btn-sm" onclick="loadPedidos()">↻ Actualizar</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th><th>Socio</th><th>Genética</th><th>Gramos</th>
+              <th>Total</th><th>Día retiro</th><th>Estado</th><th>Fecha</th><th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="pedidos-tbody"><tr><td colspan="9" class="loading">Cargando...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── GENÉTICAS ── -->
+    <div id="section-geneticas" class="section">
+      <div class="section-header">
+        <h2>Genéticas</h2>
+        <button class="btn btn-gold" onclick="abrirModalGenetica()">+ Nueva genética</button>
+      </div>
+      <div id="geneticas-list"><div class="loading">Cargando...</div></div>
+    </div>
+
+    <!-- ── PROMOCIONES ── -->
+    <div id="section-promociones" class="section">
+      <div class="section-header">
+        <h2>Promociones</h2>
+        <button class="btn btn-gold" onclick="abrirModalPromo()">+ Nueva promoción</button>
+      </div>
+      <div id="promociones-list"><div class="loading">Cargando...</div></div>
+    </div>
+
+    <!-- ── SOCIOS ── -->
+    <div id="section-socios" class="section">
+      <h2>Socios</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>ID Telegram</th><th>Nombre</th><th>@Username</th><th>Último contacto</th></tr>
+          </thead>
+          <tbody id="socios-tbody"><tr><td colspan="4" class="loading">Cargando...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ════════════════ MODAL: GENÉTICA ════════════════ -->
+<div class="modal-overlay" id="modal-genetica">
+  <div class="modal">
+    <h2 id="modal-genetica-title">Nueva genética</h2>
+    <form id="form-genetica" onsubmit="guardarGenetica(event)">
+      <input type="hidden" id="gid" />
+      <div class="form-row">
+        <div class="form-group">
+          <label>Nombre *</label>
+          <input type="text" id="g-nombre" required placeholder="Ej: Purple Punch" />
+        </div>
+        <div class="form-group">
+          <label>Tipo *</label>
+          <select id="g-tipo" required>
+            <option value="">— Elegir —</option>
+            <option value="sativa">Sativa</option>
+            <option value="indica">Indica</option>
+            <option value="hibrida">Híbrida</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Descripción</label>
+        <textarea id="g-descripcion" placeholder="Efecto, sabor, momento ideal..."></textarea>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>THC % (ej: 22.5)</label>
+          <input type="number" id="g-thc" step="0.1" min="0" max="35" />
+        </div>
+        <div class="form-group">
+          <label>CBD % (ej: 0.3)</label>
+          <input type="number" id="g-cbd" step="0.1" min="0" max="25" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Terpenos</label>
+        <input type="text" id="g-terpenos" placeholder="Ej: Mirceno, Limoneno, Cariofileno" />
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Precio por gramo ($) *</label>
+          <input type="number" id="g-precio" step="0.01" min="0" required placeholder="1800" />
+        </div>
+        <div class="form-group">
+          <label>Disponible (en stock)</label>
+          <label class="toggle" style="margin-top:.5rem">
+            <input type="checkbox" id="g-disponible" checked />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline" onclick="cerrarModal('modal-genetica')">Cancelar</button>
+        <button type="submit" class="btn btn-gold">Guardar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ════════════════ MODAL: PROMOCIÓN ════════════════ -->
+<div class="modal-overlay" id="modal-promo">
+  <div class="modal">
+    <h2 id="modal-promo-title">Nueva promoción</h2>
+    <form id="form-promo" onsubmit="guardarPromo(event)">
+      <input type="hidden" id="pid" />
+      <div class="form-group">
+        <label>Título *</label>
+        <input type="text" id="p-titulo" required placeholder="Ej: Descuento de bienvenida" />
+      </div>
+      <div class="form-group">
+        <label>Descripción *</label>
+        <textarea id="p-descripcion" required placeholder="Describí la promo en detalle..."></textarea>
+      </div>
+      <div class="form-group">
+        <label>Activa</label>
+        <label class="toggle" style="margin-top:.5rem">
+          <input type="checkbox" id="p-activa" checked />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline" onclick="cerrarModal('modal-promo')">Cancelar</button>
+        <button type="submit" class="btn btn-gold">Guardar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ════════════════ TOAST ════════════════ -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ════════════════════════════════════════════════════════════════
+// CONFIGURACIÓN — Reemplazá con tus datos de Supabase
+// ════════════════════════════════════════════════════════════════
+const SUPABASE_URL  = "TU_SUPABASE_URL_AQUI";      // ← cambiar
+const SUPABASE_KEY  = "TU_SUPABASE_ANON_KEY_AQUI"; // ← cambiar (anon key)
+const ADMIN_PASSWORD = "melodys2025";              // ← cambiar si querés
+
+// ════════════════════════════════════════════════════════════════
+// SUPABASE CLIENT
+// ════════════════════════════════════════════════════════════════
+const { createClient } = supabase;
+const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ════════════════════════════════════════════════════════════════
+// LOGIN
+// ════════════════════════════════════════════════════════════════
+function doLogin() {
+  const pwd = document.getElementById("pwd-input").value;
+  if (pwd === ADMIN_PASSWORD) {
+    sessionStorage.setItem("admin_ok", "1");
+    document.getElementById("login-screen").style.display = "none";
+    document.getElementById("app").style.display = "block";
+    initApp();
+  } else {
+    document.getElementById("login-error").textContent = "Contraseña incorrecta.";
+  }
+}
+
+function doLogout() {
+  sessionStorage.removeItem("admin_ok");
+  location.reload();
+}
+
+// Auto-login si ya estaba autenticado en esta pestaña
+if (sessionStorage.getItem("admin_ok")) {
+  document.getElementById("login-screen").style.display = "none";
+  document.getElementById("app").style.display = "block";
+  document.addEventListener("DOMContentLoaded", initApp);
+}
+
+// ════════════════════════════════════════════════════════════════
+// NAVEGACIÓN
+// ════════════════════════════════════════════════════════════════
+function showSection(name, btn) {
+  document.querySelectorAll(".section").forEach(s => s.classList.remove("active"));
+  document.querySelectorAll("nav button").forEach(b => b.classList.remove("active"));
+  document.getElementById("section-" + name).classList.add("active");
+  if (btn) btn.classList.add("active");
+
+  // Cargar datos al entrar a la sección
+  if (name === "pedidos")    loadPedidos();
+  if (name === "geneticas")  loadGeneticas();
+  if (name === "promociones") loadPromociones();
+  if (name === "socios")     loadSocios();
+}
+
+// ════════════════════════════════════════════════════════════════
+// INIT
+// ════════════════════════════════════════════════════════════════
+async function initApp() {
+  await loadDashboard();
+}
+
+// ════════════════════════════════════════════════════════════════
+// DASHBOARD
+// ════════════════════════════════════════════════════════════════
+async function loadDashboard() {
+  const hoy = new Date().toISOString().split("T")[0];
+
+  const [pedidosHoy, pendientes, geneticas, socios] = await Promise.all([
+    sb.from("pedidos").select("id", { count: "exact" }).gte("created_at", hoy),
+    sb.from("pedidos").select("id", { count: "exact" }).eq("estado", "pendiente"),
+    sb.from("geneticas").select("id", { count: "exact" }).eq("disponible", true),
+    sb.from("socios").select("id", { count: "exact" }),
+  ]);
+
+  document.getElementById("stat-pedidos-hoy").textContent = pedidosHoy.count ?? "—";
+  document.getElementById("stat-pendientes").textContent  = pendientes.count ?? "—";
+  document.getElementById("stat-geneticas").textContent   = geneticas.count ?? "—";
+  document.getElementById("stat-socios").textContent      = socios.count ?? "—";
+
+  // Últimos pedidos pendientes
+  const { data } = await sb.from("pedidos")
+    .select("*, geneticas(nombre)")
+    .eq("estado", "pendiente")
+    .order("created_at", { ascending: false })
+    .limit(5);
+
+  const el = document.getElementById("dashboard-pedidos-list");
+  if (!data || data.length === 0) {
+    el.innerHTML = '<div class="empty">No hay pedidos pendientes 🎉</div>';
+    return;
+  }
+  el.innerHTML = data.map(p => `
+    <div class="card">
+      <div class="card-body">
+        <h4>${p.nombre_socio}</h4>
+        <p>${p.geneticas?.nombre || "—"} · ${p.gramos}g · $${p.total} · Retiro: ${p.dia_retiro}</p>
+      </div>
+      <div class="card-actions">
+        <button class="btn btn-green btn-sm" onclick="cambiarEstado(${p.id},'confirmado')">Confirmar</button>
+        <button class="btn btn-red btn-sm" onclick="cambiarEstado(${p.id},'cancelado')">Cancelar</button>
+      </div>
+    </div>
+  `).join("");
+}
+
+// ════════════════════════════════════════════════════════════════
+// PEDIDOS
+// ════════════════════════════════════════════════════════════════
+async function loadPedidos() {
+  const estado = document.getElementById("filtro-estado")?.value || "";
+  let q = sb.from("pedidos").select("*, geneticas(nombre)").order("created_at", { ascending: false }).limit(100);
+  if (estado) q = q.eq("estado", estado);
+
+  const { data, error } = await q;
+  const tbody = document.getElementById("pedidos-tbody");
+
+  if (error || !data) {
+    tbody.innerHTML = `<tr><td colspan="9" class="empty">Error cargando pedidos</td></tr>`;
+    return;
+  }
+  if (data.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="9" class="empty">No hay pedidos</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = data.map(p => `
+    <tr>
+      <td>#${p.id}</td>
+      <td>${p.nombre_socio}<br><small style="color:var(--muted)">${p.telegram_id}</small></td>
+      <td>${p.geneticas?.nombre || "—"}</td>
+      <td>${p.gramos}g</td>
+      <td>$${p.total}</td>
+      <td>${p.dia_retiro}</td>
+      <td><span class="badge-estado badge-${p.estado}">${p.estado}</span></td>
+      <td><small>${new Date(p.created_at).toLocaleString("es-AR")}</small></td>
+      <td>
+        <select onchange="cambiarEstado(${p.id}, this.value)" style="background:var(--surface2);border:1px solid var(--border);color:var(--white);padding:.25rem .5rem;border-radius:6px;font-size:.8rem">
+          <option value="">— estado —</option>
+          <option value="pendiente">Pendiente</option>
+          <option value="confirmado">Confirmado</option>
+          <option value="entregado">Entregado</option>
+          <option value="cancelado">Cancelado</option>
+        </select>
+      </td>
+    </tr>
+  `).join("");
+}
+
+async function cambiarEstado(id, estado) {
+  if (!estado) return;
+  const { error } = await sb.from("pedidos").update({ estado }).eq("id", id);
+  if (error) return showToast("Error actualizando pedido", "err");
+  showToast(`Pedido #${id} → ${estado}`, "ok");
+  loadPedidos();
+  loadDashboard();
+}
+
+// ════════════════════════════════════════════════════════════════
+// GENÉTICAS
+// ════════════════════════════════════════════════════════════════
+async function loadGeneticas() {
+  const { data } = await sb.from("geneticas").select("*").order("nombre");
+  const el = document.getElementById("geneticas-list");
+
+  if (!data || data.length === 0) {
+    el.innerHTML = '<div class="empty">No hay genéticas cargadas</div>';
+    return;
+  }
+
+  el.innerHTML = data.map(g => `
+    <div class="card">
+      <div style="flex:1">
+        <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:.3rem">
+          <strong>${g.nombre}</strong>
+          <span style="font-size:.75rem;color:var(--muted);background:var(--surface2);padding:.1rem .5rem;border-radius:99px;border:1px solid var(--border)">${g.tipo}</span>
+          ${g.disponible ? '<span style="font-size:.75rem;color:#8f8">● Disponible</span>' : '<span style="font-size:.75rem;color:#e88">● Sin stock</span>'}
+        </div>
+        <div style="font-size:.875rem;color:var(--muted)">
+          $${g.precio_por_gramo}/gr
+          ${g.thc ? `· THC ${g.thc}%` : ""}
+          ${g.cbd ? `· CBD ${g.cbd}%` : ""}
+          ${g.terpenos ? `· ${g.terpenos}` : ""}
+        </div>
+        ${g.descripcion ? `<div style="font-size:.8rem;color:#666;margin-top:.3rem">${g.descripcion}</div>` : ""}
+      </div>
+      <div class="card-actions">
+        <label class="toggle" title="${g.disponible ? 'Desactivar stock' : 'Activar stock'}">
+          <input type="checkbox" ${g.disponible ? "checked" : ""} onchange="toggleGenetica(${g.id}, this.checked)" />
+          <span class="toggle-slider"></span>
+        </label>
+        <button class="btn btn-outline btn-sm" onclick="abrirModalGenetica(${g.id})">Editar</button>
+        <button class="btn btn-red btn-sm" onclick="eliminarGenetica(${g.id}, '${g.nombre}')">🗑</button>
+      </div>
+    </div>
+  `).join("");
+}
+
+async function toggleGenetica(id, disponible) {
+  const { error } = await sb.from("geneticas").update({ disponible, updated_at: new Date().toISOString() }).eq("id", id);
+  if (error) return showToast("Error actualizando disponibilidad", "err");
+  showToast(disponible ? "Genética activada" : "Genética desactivada", "ok");
+  loadGeneticas();
+}
+
+async function eliminarGenetica(id, nombre) {
+  if (!confirm(`¿Eliminar "${nombre}"? Esta acción no se puede deshacer.`)) return;
+  const { error } = await sb.from("geneticas").delete().eq("id", id);
+  if (error) return showToast("Error eliminando genética", "err");
+  showToast("Genética eliminada", "ok");
+  loadGeneticas();
+}
+
+function abrirModalGenetica(id = null) {
+  document.getElementById("form-genetica").reset();
+  document.getElementById("gid").value = "";
+  document.getElementById("modal-genetica-title").textContent = id ? "Editar genética" : "Nueva genética";
+  document.getElementById("g-disponible").checked = true;
+
+  if (id) {
+    sb.from("geneticas").select("*").eq("id", id).single().then(({ data }) => {
+      if (!data) return;
+      document.getElementById("gid").value         = data.id;
+      document.getElementById("g-nombre").value     = data.nombre || "";
+      document.getElementById("g-tipo").value       = data.tipo || "";
+      document.getElementById("g-descripcion").value = data.descripcion || "";
+      document.getElementById("g-thc").value        = data.thc || "";
+      document.getElementById("g-cbd").value        = data.cbd || "";
+      document.getElementById("g-terpenos").value   = data.terpenos || "";
+      document.getElementById("g-precio").value     = data.precio_por_gramo || "";
+      document.getElementById("g-disponible").checked = data.disponible;
+    });
+  }
+  document.getElementById("modal-genetica").classList.add("open");
+}
+
+async function guardarGenetica(e) {
+  e.preventDefault();
+  const id = document.getElementById("gid").value;
+  const datos = {
+    nombre:           document.getElementById("g-nombre").value.trim(),
+    tipo:             document.getElementById("g-tipo").value,
+    descripcion:      document.getElementById("g-descripcion").value.trim() || null,
+    thc:              parseFloat(document.getElementById("g-thc").value) || null,
+    cbd:              parseFloat(document.getElementById("g-cbd").value) || null,
+    terpenos:         document.getElementById("g-terpenos").value.trim() || null,
+    precio_por_gramo: parseFloat(document.getElementById("g-precio").value),
+    disponible:       document.getElementById("g-disponible").checked,
+    updated_at:       new Date().toISOString(),
+  };
+
+  let error;
+  if (id) {
+    ({ error } = await sb.from("geneticas").update(datos).eq("id", id));
+  } else {
+    ({ error } = await sb.from("geneticas").insert([datos]));
+  }
+
+  if (error) return showToast("Error guardando genética: " + error.message, "err");
+  showToast(id ? "Genética actualizada" : "Genética creada", "ok");
+  cerrarModal("modal-genetica");
+  loadGeneticas();
+}
+
+// ════════════════════════════════════════════════════════════════
+// PROMOCIONES
+// ════════════════════════════════════════════════════════════════
+async function loadPromociones() {
+  const { data } = await sb.from("promociones").select("*").order("created_at", { ascending: false });
+  const el = document.getElementById("promociones-list");
+
+  if (!data || data.length === 0) {
+    el.innerHTML = '<div class="empty">No hay promociones</div>';
+    return;
+  }
+
+  el.innerHTML = data.map(p => `
+    <div class="card">
+      <div class="card-body">
+        <h4>${p.titulo} ${p.activa ? '<span style="font-size:.75rem;color:#8f8">● Activa</span>' : '<span style="font-size:.75rem;color:#e88">● Inactiva</span>'}</h4>
+        <p>${p.descripcion}</p>
+      </div>
+      <div class="card-actions">
+        <label class="toggle">
+          <input type="checkbox" ${p.activa ? "checked" : ""} onchange="togglePromo(${p.id}, this.checked)" />
+          <span class="toggle-slider"></span>
+        </label>
+        <button class="btn btn-outline btn-sm" onclick="abrirModalPromo(${p.id})">Editar</button>
+        <button class="btn btn-red btn-sm" onclick="eliminarPromo(${p.id})">🗑</button>
+      </div>
+    </div>
+  `).join("");
+}
+
+async function togglePromo(id, activa) {
+  const { error } = await sb.from("promociones").update({ activa }).eq("id", id);
+  if (error) return showToast("Error actualizando promoción", "err");
+  showToast(activa ? "Promoción activada" : "Promoción desactivada", "ok");
+  loadPromociones();
+}
+
+async function eliminarPromo(id) {
+  if (!confirm("¿Eliminar esta promoción?")) return;
+  const { error } = await sb.from("promociones").delete().eq("id", id);
+  if (error) return showToast("Error eliminando promoción", "err");
+  showToast("Promoción eliminada", "ok");
+  loadPromociones();
+}
+
+function abrirModalPromo(id = null) {
+  document.getElementById("form-promo").reset();
+  document.getElementById("pid").value = "";
+  document.getElementById("modal-promo-title").textContent = id ? "Editar promoción" : "Nueva promoción";
+  document.getElementById("p-activa").checked = true;
+
+  if (id) {
+    sb.from("promociones").select("*").eq("id", id).single().then(({ data }) => {
+      if (!data) return;
+      document.getElementById("pid").value         = data.id;
+      document.getElementById("p-titulo").value     = data.titulo || "";
+      document.getElementById("p-descripcion").value = data.descripcion || "";
+      document.getElementById("p-activa").checked   = data.activa;
+    });
+  }
+  document.getElementById("modal-promo").classList.add("open");
+}
+
+async function guardarPromo(e) {
+  e.preventDefault();
+  const id = document.getElementById("pid").value;
+  const datos = {
+    titulo:      document.getElementById("p-titulo").value.trim(),
+    descripcion: document.getElementById("p-descripcion").value.trim(),
+    activa:      document.getElementById("p-activa").checked,
+  };
+
+  let error;
+  if (id) {
+    ({ error } = await sb.from("promociones").update(datos).eq("id", id));
+  } else {
+    ({ error } = await sb.from("promociones").insert([datos]));
+  }
+
+  if (error) return showToast("Error guardando promoción: " + error.message, "err");
+  showToast(id ? "Promoción actualizada" : "Promoción creada", "ok");
+  cerrarModal("modal-promo");
+  loadPromociones();
+}
+
+// ════════════════════════════════════════════════════════════════
+// SOCIOS
+// ════════════════════════════════════════════════════════════════
+async function loadSocios() {
+  const { data } = await sb.from("socios").select("*").order("ultimo_contacto", { ascending: false });
+  const tbody = document.getElementById("socios-tbody");
+
+  if (!data || data.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="4" class="empty">No hay socios registrados aún</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = data.map(s => `
+    <tr>
+      <td><code>${s.telegram_id}</code></td>
+      <td>${s.nombre || "—"}</td>
+      <td>${s.username ? "@" + s.username : "—"}</td>
+      <td>${new Date(s.ultimo_contacto).toLocaleString("es-AR")}</td>
+    </tr>
+  `).join("");
+}
+
+// ════════════════════════════════════════════════════════════════
+// HELPERS
+// ════════════════════════════════════════════════════════════════
+function cerrarModal(id) {
+  document.getElementById(id).classList.remove("open");
+}
+
+// Cerrar modal tocando el overlay
+document.querySelectorAll(".modal-overlay").forEach(el => {
+  el.addEventListener("click", e => {
+    if (e.target === el) cerrarModal(el.id);
+  });
+});
+
+let toastTimeout;
+function showToast(msg, type = "ok") {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.className = `toast show ${type}`;
+  clearTimeout(toastTimeout);
+  toastTimeout = setTimeout(() => el.classList.remove("show"), 3000);
+}
+</script>
+</body>
+</html>
