@@ -18,6 +18,11 @@ const db = require("./db");
 // Días de retiro disponibles
 const DIAS_RETIRO = ["Martes", "Jueves", "Sábado"];
 
+// Mensaje estándar para usuarios no autorizados
+const MSG_NO_AUTORIZADO =
+  "⛔ No estás autorizado para usar este bot.\n\n" +
+  "Si sos socio de Melodys Farm, contactá al admin para que te habilite el acceso.";
+
 // ─── MENSAJES DE TEXTO ────────────────────────────────────────────────────────
 
 async function handleMessage(msg) {
@@ -29,6 +34,17 @@ async function handleMessage(msg) {
 
   // Registrar/actualizar socio en la base de datos
   await db.registrarSocio(telegramId, nombre, username).catch(() => {});
+
+  // ─── CHEQUEO DE AUTORIZACIÓN ─────────────────────────────────────────────────
+  // /start es el único comando que funciona sin autorización (para que el admin
+  // pueda ver el Telegram ID del socio y autorizarlo desde el panel)
+  const esStart = texto === "/start";
+  if (!esStart) {
+    const autorizado = await db.esSocioAutorizado(telegramId).catch(() => false);
+    if (!autorizado) {
+      return tg.sendMessage(chatId, MSG_NO_AUTORIZADO);
+    }
+  }
 
   // Obtener o crear sesión
   const session = getOrCreateSession(telegramId, nombre);
@@ -95,6 +111,12 @@ async function handleCallback(query) {
   // Siempre responder el callback para quitar el loading de Telegram
   await tg.answerCallback(query.id);
 
+  // Chequeo de autorización para callbacks también
+  const autorizado = await db.esSocioAutorizado(telegramId).catch(() => false);
+  if (!autorizado) {
+    return tg.sendMessage(chatId, MSG_NO_AUTORIZADO);
+  }
+
   const session = getOrCreateSession(telegramId, nombre);
 
   // ─── Menú principal
@@ -130,7 +152,17 @@ async function handleComando(chatId, texto, telegramId, nombre, session) {
   const comando = texto.split(" ")[0].toLowerCase();
 
   switch (comando) {
-    case "/start":
+    case "/start": {
+      const autorizado = await db.esSocioAutorizado(telegramId).catch(() => false);
+      if (!autorizado) {
+        return tg.sendMessage(chatId,
+          `¡Hola ${nombre}! 🌿 Bienvenido a *Melodys Farm*.\n\n` +
+          `⛔ Tu acceso todavía no está habilitado.\n\n` +
+          `Enviá este número a tu admin para que te active:\n` +
+          `\`${telegramId}\`\n\n` +
+          `Una vez que te habiliten, escribí /start de nuevo.`
+        );
+      }
       return tg.sendButtons(chatId,
         `¡Hola ${nombre}! 🌿 Soy *Melody*, el asistente de *Melodys Farm*.\n\nPuedo ayudarte a ver el stock disponible, contarte sobre nuestras genéticas y tomar tu pedido. ¿Qué querés hacer?`,
         [
@@ -139,6 +171,7 @@ async function handleComando(chatId, texto, telegramId, nombre, session) {
           [{ text: "🎁 Promociones", callback_data: "ver_promos" }],
         ]
       );
+    }
 
     case "/menu":
       return mostrarMenu(chatId, nombre);

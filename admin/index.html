@@ -250,7 +250,7 @@
         <div class="stat-card"><div class="label">Pedidos hoy</div><div class="value" id="stat-pedidos-hoy">—</div></div>
         <div class="stat-card"><div class="label">Pendientes</div><div class="value" id="stat-pendientes">—</div></div>
         <div class="stat-card"><div class="label">Genéticas activas</div><div class="value" id="stat-geneticas">—</div></div>
-        <div class="stat-card"><div class="label">Socios registrados</div><div class="value" id="stat-socios">—</div></div>
+        <div class="stat-card"><div class="label">Socios autorizados</div><div class="value" id="stat-socios">—</div><div class="sub" id="stat-socios-sub"></div></div>
       </div>
 
       <h3>Pedidos pendientes</h3>
@@ -309,9 +309,9 @@
       <div class="table-wrap">
         <table>
           <thead>
-            <tr><th>ID Telegram</th><th>Nombre</th><th>@Username</th><th>Último contacto</th></tr>
+            <tr><th>ID Telegram</th><th>Nombre</th><th>@Username</th><th>Último contacto</th><th>Autorizado</th></tr>
           </thead>
-          <tbody id="socios-tbody"><tr><td colspan="4" class="loading">Cargando...</td></tr></tbody>
+          <tbody id="socios-tbody"><tr><td colspan="5" class="loading">Cargando...</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -415,8 +415,8 @@
 // ════════════════════════════════════════════════════════════════
 // CONFIGURACIÓN — Reemplazá con tus datos de Supabase
 // ════════════════════════════════════════════════════════════════
-const SUPABASE_URL  = "TU_SUPABASE_URL_AQUI";      // ← cambiar
-const SUPABASE_KEY  = "TU_SUPABASE_ANON_KEY_AQUI"; // ← cambiar (anon key)
+const SUPABASE_URL  = "https://spirakozxkymwstelrph.supabase.co";
+const SUPABASE_KEY  = "tu-anon-key-aqui";  // ← la anon key que tenés en el bloc de notas
 const ADMIN_PASSWORD = "melodys2025";              // ← cambiar si querés
 
 // ════════════════════════════════════════════════════════════════
@@ -481,17 +481,19 @@ async function initApp() {
 async function loadDashboard() {
   const hoy = new Date().toISOString().split("T")[0];
 
-  const [pedidosHoy, pendientes, geneticas, socios] = await Promise.all([
+  const [pedidosHoy, pendientes, geneticas, sociosAuth, sociosTotal] = await Promise.all([
     sb.from("pedidos").select("id", { count: "exact" }).gte("created_at", hoy),
     sb.from("pedidos").select("id", { count: "exact" }).eq("estado", "pendiente"),
     sb.from("geneticas").select("id", { count: "exact" }).eq("disponible", true),
+    sb.from("socios").select("id", { count: "exact" }).eq("autorizado", true),
     sb.from("socios").select("id", { count: "exact" }),
   ]);
 
   document.getElementById("stat-pedidos-hoy").textContent = pedidosHoy.count ?? "—";
   document.getElementById("stat-pendientes").textContent  = pendientes.count ?? "—";
   document.getElementById("stat-geneticas").textContent   = geneticas.count ?? "—";
-  document.getElementById("stat-socios").textContent      = socios.count ?? "—";
+  document.getElementById("stat-socios").textContent      = sociosAuth.count ?? "—";
+  document.getElementById("stat-socios-sub").textContent  = `de ${sociosTotal.count ?? "—"} registrados`;
 
   // Últimos pedidos pendientes
   const { data } = await sb.from("pedidos")
@@ -770,7 +772,7 @@ async function loadSocios() {
   const tbody = document.getElementById("socios-tbody");
 
   if (!data || data.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="4" class="empty">No hay socios registrados aún</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5" class="empty">No hay socios registrados aún. Cuando alguien escriba /start en el bot, aparece acá.</td></tr>`;
     return;
   }
 
@@ -780,8 +782,26 @@ async function loadSocios() {
       <td>${s.nombre || "—"}</td>
       <td>${s.username ? "@" + s.username : "—"}</td>
       <td>${new Date(s.ultimo_contacto).toLocaleString("es-AR")}</td>
+      <td>
+        <label class="toggle" title="${s.autorizado ? 'Quitar acceso' : 'Dar acceso'}">
+          <input type="checkbox" ${s.autorizado ? "checked" : ""}
+            onchange="toggleSocioAuth('${s.telegram_id}', this.checked)" />
+          <span class="toggle-slider"></span>
+        </label>
+        <span style="font-size:.75rem;color:${s.autorizado ? '#8f8' : '#e88'};margin-left:.5rem">
+          ${s.autorizado ? "Habilitado" : "Sin acceso"}
+        </span>
+      </td>
     </tr>
   `).join("");
+}
+
+async function toggleSocioAuth(telegramId, autorizado) {
+  const { error } = await sb.from("socios").update({ autorizado }).eq("telegram_id", telegramId);
+  if (error) return showToast("Error actualizando acceso", "err");
+  showToast(autorizado ? "✅ Socio habilitado" : "⛔ Acceso removido", autorizado ? "ok" : "err");
+  loadSocios();
+  loadDashboard();
 }
 
 // ════════════════════════════════════════════════════════════════

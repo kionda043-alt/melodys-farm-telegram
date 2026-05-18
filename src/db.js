@@ -156,15 +156,56 @@ async function togglePromocion(id, activa) {
 // ─── SOCIOS ───────────────────────────────────────────────────────────────────
 
 async function registrarSocio(telegramId, nombre, username) {
+  // Al registrar, NO pisamos el campo "autorizado" si el socio ya existe
+  const key = String(telegramId);
+
+  // Verificar si ya existe
+  const { data: existente } = await supabase
+    .from("socios")
+    .select("id, autorizado")
+    .eq("telegram_id", key)
+    .single();
+
+  if (existente) {
+    // Ya existe — solo actualizar último contacto y nombre
+    const { data, error } = await supabase
+      .from("socios")
+      .update({ nombre, username, ultimo_contacto: new Date().toISOString() })
+      .eq("telegram_id", key)
+      .select()
+      .single();
+    if (error) console.error("Error actualizando socio:", error);
+    return data;
+  } else {
+    // Nuevo socio — insertar con autorizado = false
+    const { data, error } = await supabase
+      .from("socios")
+      .insert([{ telegram_id: key, nombre, username, autorizado: false, ultimo_contacto: new Date().toISOString() }])
+      .select()
+      .single();
+    if (error) console.error("Error registrando socio:", error);
+    return data;
+  }
+}
+
+async function esSocioAutorizado(telegramId) {
   const { data, error } = await supabase
     .from("socios")
-    .upsert(
-      { telegram_id: String(telegramId), nombre, username, ultimo_contacto: new Date().toISOString() },
-      { onConflict: "telegram_id" }
-    )
+    .select("autorizado")
+    .eq("telegram_id", String(telegramId))
+    .single();
+  if (error || !data) return false;
+  return data.autorizado === true;
+}
+
+async function toggleAutorizacion(telegramId, autorizado) {
+  const { data, error } = await supabase
+    .from("socios")
+    .update({ autorizado })
+    .eq("telegram_id", String(telegramId))
     .select()
     .single();
-  if (error) console.error("Error registrando socio:", error);
+  if (error) throw error;
   return data;
 }
 
@@ -184,4 +225,6 @@ module.exports = {
   crearPromocion,
   togglePromocion,
   registrarSocio,
+  esSocioAutorizado,
+  toggleAutorizacion,
 };
