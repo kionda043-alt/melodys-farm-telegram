@@ -3,8 +3,8 @@
 // Acá se procesan todos los mensajes y callbacks que llegan de Telegram.
 //
 // FLUJO DE PEDIDO:
-//   idle → waiting_genetica → waiting_gramos → waiting_confirmacion
-//        → waiting_dia_retiro → (pedido guardado en Supabase) → idle
+//   idle → waiting_genetica → waiting_gramos → waiting_carrito
+//        → (pedido guardado en Supabase, admin confirma envío) → idle
 // ─────────────────────────────────────────────────────────────────────────────
 
 const tg = require("./telegram");
@@ -14,9 +14,6 @@ const {
   setData, resetState,
 } = require("./sessions");
 const db = require("./db");
-
-// Días de retiro disponibles
-const DIAS_RETIRO = ["Martes", "Jueves", "Sábado"];
 
 // Mensaje estándar para usuarios no autorizados
 const MSG_NO_AUTORIZADO =
@@ -36,8 +33,6 @@ async function handleMessage(msg) {
   await db.registrarSocio(telegramId, nombre, username).catch(() => {});
 
   // ─── CHEQUEO DE AUTORIZACIÓN ─────────────────────────────────────────────────
-  // /start es el único comando que funciona sin autorización (para que el admin
-  // pueda ver el Telegram ID del socio y autorizarlo desde el panel)
   const esStart = texto === "/start";
   if (!esStart) {
     const autorizado = await db.esSocioAutorizado(telegramId).catch(() => false);
@@ -46,7 +41,6 @@ async function handleMessage(msg) {
     }
   }
 
-  // Obtener o crear sesión
   const session = getOrCreateSession(telegramId, nombre);
 
   // ─── COMANDOS ────────────────────────────────────────────────────────────────
@@ -68,7 +62,7 @@ async function handleMessage(msg) {
   }
 
   if (intencion === "pedido" || intencion === "stock") {
-    return iniciarFluijoPedido(chatId, telegramId);
+    return iniciarFlujoPedido(chatId, telegramId);
   }
 
   if (intencion === "saludo") {
@@ -120,9 +114,9 @@ async function handleCallback(query) {
   const session = getOrCreateSession(telegramId, nombre);
 
   // ─── Menú principal
-  if (data === "ver_stock") return mostrarStock(chatId);
-  if (data === "iniciar_pedido") return iniciarFluijoPedido(chatId, telegramId);
-  if (data === "ver_promos") return mostrarPromociones(chatId);
+  if (data === "ver_stock")      return mostrarStock(chatId);
+  if (data === "iniciar_pedido") return iniciarFlujoPedido(chatId, telegramId);
+  if (data === "ver_promos")     return mostrarPromociones(chatId);
   if (data === "cancelar_pedido") {
     resetState(telegramId);
     return tg.editMessage(chatId, messageId, "Pedido cancelado ✋ Cuando quieras podés hacer uno nuevo.");
@@ -134,13 +128,12 @@ async function handleCallback(query) {
     return handleSeleccionGenetica(chatId, telegramId, geneticaId, messageId);
   }
 
-  // ─── Selección de día de retiro
-  if (data.startsWith("dia_")) {
-    const dia = data.replace("dia_", "");
-    return handleSeleccionDia(chatId, telegramId, dia, messageId);
+  // ─── Agregar otra genética al carrito
+  if (data === "agregar_otro") {
+    return iniciarFlujoPedido(chatId, telegramId);
   }
 
-  // ─── Confirmar pedido
+  // ─── Confirmar pedido final
   if (data === "confirmar_pedido") {
     return confirmarPedido(chatId, telegramId, messageId);
   }
@@ -180,7 +173,7 @@ async function handleComando(chatId, texto, telegramId, nombre, session) {
       return mostrarStock(chatId);
 
     case "/pedido":
-      return iniciarFluijoPedido(chatId, telegramId);
+      return iniciarFlujoPedido(chatId, telegramId);
 
     case "/promos":
       return mostrarPromociones(chatId);
@@ -243,14 +236,16 @@ async function mostrarPromociones(chatId) {
   return tg.sendMessage(chatId, `*Promociones activas*\n\n${lineas.join("\n\n")}`);
 }
 
-async function iniciarFluijoPedido(chatId, telegramId) {
+async function iniciarFlujoPedido(chatId, telegramId) {
   const geneticas = await db.getGeneticasDisponibles().catch(() => []);
 
   if (geneticas.length === 0) {
     return tg.sendMessage(chatId, "😔 No hay stock disponible en este momento. Consultá más tarde.");
   }
 
-  // Crear botones con cada genética disponible
+  const session = getOrCreateSession(telegramId);
+  const tieneCarrito = session.data.carrito && session.data.carrito.length > 0;
+
   const botones = geneticas.map(g => ([
     {
       text: `${g.nombre} — $${g.precio_por_gramo}/gr`,
@@ -261,10 +256,11 @@ async function iniciarFluijoPedido(chatId, telegramId) {
 
   setState(telegramId, "waiting_genetica");
 
-  return tg.sendButtons(chatId,
-    "🛒 *Nuevo pedido*\n\n¿Qué genética querés pedir?",
-    botones
-  );
+  const intro = tieneCarrito
+    ? "¿Qué genética querés agregar al carrito?"
+    : "🛒 *Nuevo pedido*\n\n¿Qué genética querés pedir?";
+
+  return tg.sendButtons(chatId, intro, botones);
 }
 
 async function handleSeleccionGenetica(chatId, telegramId, geneticaId, messageId) {
@@ -275,11 +271,11 @@ async function handleSeleccionGenetica(chatId, telegramId, geneticaId, messageId
   }
 
   // Guardar la genética seleccionada en la sesión
-  setData(telegramId, { genetica });
+  setData(telegramId, { geneticaActual: genetica });
   setState(telegramId, "waiting_gramos");
 
   await tg.editMessage(chatId, messageId,
-    `Elegiste *${genetica.nombre}*\n💰 $${genetica.precio_por_gramo} por gramo\n\n¿Cuántos gramos querés pedir? (Escribí solo el número, ej: 3)`
+    `Elegiste *${genetica.nombre}*\n💰 $${genetica.precio_por_gramo} por gramo\n\n¿Cuántos gramos querés? (Escribí solo el número, ej: 3)`
   );
 }
 
@@ -291,66 +287,60 @@ async function handleGramos(chatId, texto, telegramId, session) {
   }
 
   if (gramos > 50) {
-    return tg.sendMessage(chatId, "La cantidad máxima por pedido es 50g. Escribí una cantidad menor.");
+    return tg.sendMessage(chatId, "La cantidad máxima por ítem es 50g. Escribí una cantidad menor.");
   }
 
-  const { genetica } = session.data;
-  const total = (gramos * genetica.precio_por_gramo).toFixed(2);
+  const { geneticaActual } = session.data;
+  const subtotal = gramos * geneticaActual.precio_por_gramo;
 
-  setData(telegramId, { gramos, total: parseFloat(total) });
-  setState(telegramId, "waiting_confirmacion");
+  // Agregar al carrito
+  const carrito = session.data.carrito || [];
+  carrito.push({
+    genetica_id: geneticaActual.id,
+    nombre: geneticaActual.nombre,
+    gramos,
+    precio_por_gramo: geneticaActual.precio_por_gramo,
+    subtotal,
+  });
+
+  setData(telegramId, { carrito, geneticaActual: null });
+  setState(telegramId, "waiting_carrito");
+
+  return mostrarCarrito(chatId, telegramId, carrito);
+}
+
+async function mostrarCarrito(chatId, telegramId, carrito) {
+  const lineas = carrito.map((item, i) =>
+    `${i + 1}. *${item.nombre}* — ${item.gramos}g — $${item.subtotal.toLocaleString("es-AR")}`
+  );
+  const total = carrito.reduce((acc, item) => acc + item.subtotal, 0);
 
   return tg.sendButtons(chatId,
-    `📋 *Resumen del pedido*\n\n` +
-    `🌿 Genética: *${genetica.nombre}*\n` +
-    `⚖️ Cantidad: *${gramos}g*\n` +
-    `💰 Total: *$${total}*\n\n` +
-    `¿Confirmás el pedido?`,
+    `🛒 *Tu carrito*\n\n${lineas.join("\n")}\n\n💰 *Total: $${total.toLocaleString("es-AR")}*`,
     [
-      [
-        { text: "✅ Confirmar", callback_data: "confirmar_pedido" },
-        { text: "❌ Cancelar", callback_data: "cancelar_pedido" },
-      ]
+      [{ text: "➕ Agregar otra genética", callback_data: "agregar_otro" }],
+      [{ text: "✅ Confirmar pedido", callback_data: "confirmar_pedido" }],
+      [{ text: "❌ Cancelar", callback_data: "cancelar_pedido" }],
     ]
   );
 }
 
 async function confirmarPedido(chatId, telegramId, messageId) {
   const session = getOrCreateSession(telegramId);
-  const { genetica, gramos, total } = session.data;
+  const { carrito } = session.data;
 
-  setState(telegramId, "waiting_dia_retiro");
-
-  const botonesDias = DIAS_RETIRO.map(dia => ([
-    { text: dia, callback_data: `dia_${dia}` }
-  ]));
-  botonesDias.push([{ text: "❌ Cancelar", callback_data: "cancelar_pedido" }]);
-
-  await tg.editMessage(chatId, messageId,
-    `✅ Pedido registrado!\n\n` +
-    `*${genetica.nombre}* — ${gramos}g — $${total}\n\n` +
-    `¿Qué día preferís retirar?`
-  );
-
-  return tg.sendButtons(chatId, "Elegí el día de retiro:", botonesDias);
-}
-
-async function handleSeleccionDia(chatId, telegramId, dia, messageId) {
-  const session = getOrCreateSession(telegramId);
-  const { genetica, gramos, total } = session.data;
-
-  if (!DIAS_RETIRO.includes(dia)) {
-    return tg.sendMessage(chatId, "Día no válido. Elegí entre: Martes, Jueves o Sábado.");
+  if (!carrito || carrito.length === 0) {
+    resetState(telegramId);
+    return tg.sendMessage(chatId, "No hay nada en el carrito. Escribí /pedido para empezar.");
   }
 
-  // Guardar el pedido en Supabase
+  const total = carrito.reduce((acc, item) => acc + item.subtotal, 0);
+
   const pedidoDatos = {
     telegram_id: String(telegramId),
     nombre_socio: session.nombre,
-    genetica_id: genetica.id,
-    gramos: parseFloat(gramos),
-    total: parseFloat(total),
-    dia_retiro: dia,
+    items: carrito,
+    total,
     estado: "pendiente",
   };
 
@@ -364,15 +354,17 @@ async function handleSeleccionDia(chatId, telegramId, dia, messageId) {
     return tg.sendMessage(chatId, "Hubo un error guardando el pedido 😔 Escribí /pedido para intentar de nuevo.");
   }
 
-  // Pedido exitoso — resetear estado
   resetState(telegramId);
 
+  const lineas = carrito.map(item =>
+    `🌿 ${item.nombre} — ${item.gramos}g — $${item.subtotal.toLocaleString("es-AR")}`
+  );
+
   return tg.editMessage(chatId, messageId,
-    `🎉 *¡Pedido confirmado!*\n\n` +
-    `🌿 ${genetica.nombre} — ${gramos}g\n` +
-    `💰 Total a pagar: *$${total}*\n` +
-    `📅 Día de retiro: *${dia}*\n\n` +
-    `El admin del club te va a confirmar el horario exacto. ¡Gracias! 🙏`
+    `✅ *¡Pedido recibido!*\n\n` +
+    `${lineas.join("\n")}\n\n` +
+    `💰 Total: *$${total.toLocaleString("es-AR")}*\n\n` +
+    `📦 En breve te avisamos por acá el día y horario de entrega. ¡Gracias! 🙏`
   );
 }
 
