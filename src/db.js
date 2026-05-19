@@ -78,6 +78,11 @@ async function toggleDisponibilidad(id, disponible) {
 
 // ─── PEDIDOS ──────────────────────────────────────────────────────────────────
 
+/**
+ * Crear un pedido nuevo.
+ * datos = { telegram_id, nombre_socio, items (array JSON), total, estado }
+ * El campo "items" reemplaza genetica_id/gramos/dia_retiro en los pedidos nuevos.
+ */
 async function crearPedido(datos) {
   const { data, error } = await supabase
     .from("pedidos")
@@ -88,10 +93,20 @@ async function crearPedido(datos) {
   return data;
 }
 
+async function getPedidoById(id) {
+  const { data, error } = await supabase
+    .from("pedidos")
+    .select("*")
+    .eq("id", id)
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 async function getPedidosPendientes() {
   const { data, error } = await supabase
     .from("pedidos")
-    .select("*, geneticas(nombre)")
+    .select("*")
     .eq("estado", "pendiente")
     .order("created_at", { ascending: false });
   if (error) throw error;
@@ -113,6 +128,21 @@ async function actualizarEstadoPedido(id, estado) {
   const { data, error } = await supabase
     .from("pedidos")
     .update({ estado })
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Confirmar el envío de un pedido: guarda día, horario, cambia estado a "confirmado".
+ * Llamado desde el endpoint /api/confirmar-envio del server.
+ */
+async function confirmarEnvio(id, dia_envio, horario_envio) {
+  const { data, error } = await supabase
+    .from("pedidos")
+    .update({ dia_envio, horario_envio, estado: "confirmado" })
     .eq("id", id)
     .select()
     .single();
@@ -156,10 +186,8 @@ async function togglePromocion(id, activa) {
 // ─── SOCIOS ───────────────────────────────────────────────────────────────────
 
 async function registrarSocio(telegramId, nombre, username) {
-  // Al registrar, NO pisamos el campo "autorizado" si el socio ya existe
   const key = String(telegramId);
 
-  // Verificar si ya existe
   const { data: existente } = await supabase
     .from("socios")
     .select("id, autorizado")
@@ -167,7 +195,6 @@ async function registrarSocio(telegramId, nombre, username) {
     .single();
 
   if (existente) {
-    // Ya existe — solo actualizar último contacto y nombre
     const { data, error } = await supabase
       .from("socios")
       .update({ nombre, username, ultimo_contacto: new Date().toISOString() })
@@ -177,7 +204,6 @@ async function registrarSocio(telegramId, nombre, username) {
     if (error) console.error("Error actualizando socio:", error);
     return data;
   } else {
-    // Nuevo socio — insertar con autorizado = false
     const { data, error } = await supabase
       .from("socios")
       .insert([{ telegram_id: key, nombre, username, autorizado: false, ultimo_contacto: new Date().toISOString() }])
@@ -218,9 +244,11 @@ module.exports = {
   actualizarGenetica,
   toggleDisponibilidad,
   crearPedido,
+  getPedidoById,
   getPedidosPendientes,
   getPedidosHoy,
   actualizarEstadoPedido,
+  confirmarEnvio,
   getPromocionesActivas,
   crearPromocion,
   togglePromocion,
