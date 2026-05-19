@@ -6,7 +6,8 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const { handleMessage, handleCallback } = require("./src/handler");
-const { setWebhook, getMe } = require("./src/telegram");
+const { setWebhook, getMe, sendMessage } = require("./src/telegram");
+const db = require("./src/db");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -15,21 +16,16 @@ app.use(cors());
 app.use(express.json());
 
 // ─── WEBHOOK DE TELEGRAM ──────────────────────────────────────────────────────
-// Telegram envía todos los mensajes/callbacks a este endpoint mediante POST
 
 app.post("/webhook", async (req, res) => {
-  // Responder 200 inmediatamente para que Telegram no reintente el envío
   res.sendStatus(200);
 
   const update = req.body;
 
   try {
-    // Mensaje de texto normal
     if (update.message) {
       await handleMessage(update.message);
     }
-
-    // Callback de botón inline (cuando el usuario toca un botón)
     if (update.callback_query) {
       await handleCallback(update.callback_query);
     }
@@ -38,8 +34,53 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
+// ─── API: CONFIRMAR ENVÍO (llamado desde el panel admin) ──────────────────────
+// El admin ingresa día y horario → se guarda en DB y se notifica al socio por Telegram
+
+app.post("/api/confirmar-envio", async (req, res) => {
+  try {
+    const { pedido_id, dia_envio, horario_envio } = req.body;
+
+    if (!pedido_id || !dia_envio || !horario_envio) {
+      return res.status(400).json({ error: "Faltan datos: pedido_id, dia_envio, horario_envio" });
+    }
+
+    // Obtener el pedido para conocer el telegram_id del socio
+    const pedido = await db.getPedidoById(pedido_id);
+    if (!pedido) {
+      return res.status(404).json({ error: "Pedido no encontrado" });
+    }
+
+    // Guardar día y horario, cambiar estado a "confirmado"
+    await db.confirmarEnvio(pedido_id, dia_envio, horario_envio);
+
+    // Armar resumen de ítems para el mensaje
+    let itemsText = "";
+    if (pedido.items && Array.isArray(pedido.items)) {
+      itemsText = pedido.items.map(item =>
+        `• ${item.nombre} — ${item.gramos}g`
+      ).join("\n");
+    }
+
+    // Notificar al socio por Telegram
+    await sendMessage(pedido.telegram_id,
+      `📦 *¡Tu pedido está confirmado!*\n\n` +
+      `${itemsText}\n\n` +
+      `📅 Día de entrega: *${dia_envio}*\n` +
+      `🕐 Horario: *${horario_envio}*\n\n` +
+      `¡Nos vemos pronto! 🌿`
+    );
+
+    console.log(`[API] Envío confirmado — Pedido #${pedido_id} → ${dia_envio} ${horario_envio}`);
+    res.json({ ok: true });
+
+  } catch (err) {
+    console.error("[API] Error confirmando envío:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── HEALTH CHECK ─────────────────────────────────────────────────────────────
-// Railway y otros servicios de hosting usan este endpoint para saber si el bot está vivo
 
 app.get("/health", (req, res) => {
   res.json({
@@ -50,7 +91,6 @@ app.get("/health", (req, res) => {
 });
 
 // ─── PANEL ADMIN ──────────────────────────────────────────────────────────────
-// Sirve el panel de administración como archivo estático
 
 const path = require("path");
 app.use("/admin", express.static(path.join(__dirname, "admin")));
@@ -60,7 +100,6 @@ app.use("/admin", express.static(path.join(__dirname, "admin")));
 app.listen(PORT, async () => {
   console.log(`\n🌿 Melodys Farm Bot corriendo en puerto ${PORT}`);
 
-  // Verificar que la API Key de Telegram funciona
   const botInfo = await getMe();
   if (botInfo) {
     console.log(`🤖 Bot conectado: @${botInfo.username} (${botInfo.first_name})`);
@@ -68,7 +107,6 @@ app.listen(PORT, async () => {
     console.error("❌ Error conectando con Telegram. Verificá el TELEGRAM_TOKEN en el .env");
   }
 
-  // Registrar el webhook automáticamente al iniciar
   const webhookUrl = process.env.WEBHOOK_URL;
   if (webhookUrl) {
     await setWebhook(`${webhookUrl}/webhook`);
