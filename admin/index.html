@@ -276,8 +276,8 @@
         <table>
           <thead>
             <tr>
-              <th>#</th><th>Socio</th><th>Genética</th><th>Gramos</th>
-              <th>Total</th><th>Día retiro</th><th>Estado</th><th>Fecha</th><th>Acciones</th>
+              <th>#</th><th>Socio</th><th>Ítems del pedido</th>
+              <th>Total</th><th>Día envío</th><th>Horario</th><th>Estado</th><th>Fecha</th><th>Acciones</th>
             </tr>
           </thead>
           <tbody id="pedidos-tbody"><tr><td colspan="9" class="loading">Cargando...</td></tr></tbody>
@@ -511,7 +511,7 @@ async function loadDashboard() {
     <div class="card">
       <div class="card-body">
         <h4>${p.nombre_socio}</h4>
-        <p>${p.geneticas?.nombre || "—"} · ${p.gramos}g · $${p.total} · Retiro: ${p.dia_retiro}</p>
+        <p>${renderItemsDashboard(p.items)} · $${p.total}${p.dia_envio ? ' · Envío: ' + p.dia_envio : ''}</p>
       </div>
       <div class="card-actions">
         <button class="btn btn-green btn-sm" onclick="cambiarEstado(${p.id},'confirmado')">Confirmar</button>
@@ -524,9 +524,23 @@ async function loadDashboard() {
 // ════════════════════════════════════════════════════════════════
 // PEDIDOS
 // ════════════════════════════════════════════════════════════════
+// Helper para mostrar items en el dashboard (mini-card)
+function renderItemsDashboard(items) {
+  if (!items || !Array.isArray(items)) return "—";
+  return items.map(i => `${i.nombre} ${i.gramos}g`).join(", ");
+}
+
+// Helper para mostrar items en tabla
+function renderItemsTabla(items) {
+  if (!items || !Array.isArray(items)) return "—";
+  return items.map(i =>
+    `<span style="display:block;font-size:.8rem">🌿 ${i.nombre} — ${i.gramos}g</span>`
+  ).join("");
+}
+
 async function loadPedidos() {
   const estado = document.getElementById("filtro-estado")?.value || "";
-  let q = sb.from("pedidos").select("*, geneticas(nombre)").order("created_at", { ascending: false }).limit(100);
+  let q = sb.from("pedidos").select("*").order("created_at", { ascending: false }).limit(100);
   if (estado) q = q.eq("estado", estado);
 
   const { data, error } = await q;
@@ -545,14 +559,31 @@ async function loadPedidos() {
     <tr>
       <td>#${p.id}</td>
       <td>${p.nombre_socio}<br><small style="color:var(--muted)">${p.telegram_id}</small></td>
-      <td>${p.geneticas?.nombre || "—"}</td>
-      <td>${p.gramos}g</td>
+      <td>${renderItemsTabla(p.items)}</td>
       <td>$${p.total}</td>
-      <td>${p.dia_retiro}</td>
+      <td>
+        ${p.dia_envio
+          ? `<span style="color:#8f8;font-size:.85rem">${p.dia_envio}</span>`
+          : `<input type="text" id="dia-${p.id}" placeholder="Ej: Martes 27/5"
+               style="background:var(--surface2);border:1px solid var(--border);color:var(--white);padding:.3rem .5rem;border-radius:6px;font-size:.8rem;width:120px" />`
+        }
+      </td>
+      <td>
+        ${p.horario_envio
+          ? `<span style="color:#8f8;font-size:.85rem">${p.horario_envio}</span>`
+          : `<input type="text" id="horario-${p.id}" placeholder="Ej: 20:00 - 22:00"
+               style="background:var(--surface2);border:1px solid var(--border);color:var(--white);padding:.3rem .5rem;border-radius:6px;font-size:.8rem;width:130px" />`
+        }
+      </td>
       <td><span class="badge-estado badge-${p.estado}">${p.estado}</span></td>
       <td><small>${new Date(p.created_at).toLocaleString("es-AR")}</small></td>
-      <td>
-        <select onchange="cambiarEstado(${p.id}, this.value)" style="background:var(--surface2);border:1px solid var(--border);color:var(--white);padding:.25rem .5rem;border-radius:6px;font-size:.8rem">
+      <td style="white-space:nowrap">
+        ${p.estado === "pendiente"
+          ? `<button class="btn btn-green btn-sm" onclick="enviarConfirmacion(${p.id})">📦 Confirmar envío</button>`
+          : ""
+        }
+        <select onchange="cambiarEstado(${p.id}, this.value)"
+          style="background:var(--surface2);border:1px solid var(--border);color:var(--white);padding:.25rem .5rem;border-radius:6px;font-size:.8rem;margin-top:.3rem">
           <option value="">— estado —</option>
           <option value="pendiente">Pendiente</option>
           <option value="confirmado">Confirmado</option>
@@ -562,6 +593,34 @@ async function loadPedidos() {
       </td>
     </tr>
   `).join("");
+}
+
+async function enviarConfirmacion(pedidoId) {
+  const dia = document.getElementById(`dia-${pedidoId}`)?.value?.trim();
+  const horario = document.getElementById(`horario-${pedidoId}`)?.value?.trim();
+
+  if (!dia || !horario) {
+    return showToast("Completá el día y el horario antes de confirmar", "err");
+  }
+
+  const btn = document.querySelector(`button[onclick="enviarConfirmacion(${pedidoId})"]`);
+  if (btn) { btn.disabled = true; btn.textContent = "Enviando..."; }
+
+  try {
+    const res = await fetch("/api/confirmar-envio", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pedido_id: pedidoId, dia_envio: dia, horario_envio: horario }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || "Error desconocido");
+    showToast(`✅ Pedido #${pedidoId} confirmado — socio notificado por Telegram`, "ok");
+    loadPedidos();
+    loadDashboard();
+  } catch (err) {
+    showToast("Error: " + err.message, "err");
+    if (btn) { btn.disabled = false; btn.textContent = "📦 Confirmar envío"; }
+  }
 }
 
 async function cambiarEstado(id, estado) {
